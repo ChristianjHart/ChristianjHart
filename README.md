@@ -10,6 +10,9 @@ Still early in the journey and building a range of small, practical tools —
 from computer vision experiments to web utilities — while leveling up on
 full-stack fundamentals.
 
+Professionally, I build software for healthcare-tech organizations —
+internal tools, integrations, and line-of-business apps.
+
 [![stack](hd-stack.svg)](hd-stack.svg)
 
 `python typescript javascript html css git`
@@ -28,17 +31,3 @@ A YouTube-to-MP3 conversion tool.
 [![stats](hd-stats.svg)](hd-stats.svg)
 
 [![Current and longest streak](streak.svg)](streak.svg) [![Top languages by bytes and by repo](langs.svg)](langs.svg) [![The last year, one character per day](year.svg)](year.svg)
-
-[![about this page](hd-about-this-page.svg)](hd-about-this-page.svg)
-
-Every graphic here is generated, not embedded from anyone else's server.
-`ascii.svg` is a photo pushed through a character ramp; the stat graphics and
-these section headings are drawn by [a scheduled action](.github/workflows/stats.yml)
-straight from the GitHub GraphQL API, once a day, committing only what changed.
-
-They animate with SMIL inside the SVG, because GitHub strips scripts from
-READMEs — and since nothing loads from a third party, nothing here can
-rate-limit or go dark. The headings are SVGs for the same reason: GitHub also
-strips CSS, so an image is the only way to put this page's own typeface on
-them. See [SETUP.md](SETUP.md) for how to stand this up under your own
-username.
