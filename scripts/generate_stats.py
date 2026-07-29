@@ -27,11 +27,14 @@ from svgkit import (WIDTH, LEFT, REVEAL, RAMP, LIGHT, DARK,
 
 API = "https://api.github.com/graphql"
 
-# Two things are pinned for determinism:
-#  * the contribution window, to whole UTC days - otherwise "the past year"
-#    drifts a fraction of a pixel between runs and commits noise nightly;
-#  * privacy: PUBLIC on repositories - otherwise a personal token sees
-#    private repos and the Actions token doesn't, so totals disagree.
+# The contribution window is pinned to whole UTC days - otherwise "the past
+# year" drifts a fraction of a pixel between runs and commits noise nightly.
+#
+# Repositories deliberately include org-owned and private repos (no privacy
+# filter) so language stats reflect real work, not just public hobby repos.
+# This requires GITHUB_TOKEN to be a personal token with repo + read:org
+# access (the default Actions token can only see the repo it runs in) - see
+# the "stats" job in .github/workflows/stats.yml and its STATS_TOKEN secret.
 QUERY = """
 query($login: String!, $from: DateTime!, $to: DateTime!) {
   user(login: $login) {
@@ -41,8 +44,9 @@ query($login: String!, $from: DateTime!, $to: DateTime!) {
         weeks { contributionDays { contributionCount date weekday } }
       }
     }
-    repositories(first: 100, ownerAffiliations: OWNER, isFork: false,
-                 privacy: PUBLIC) {
+    repositories(first: 100,
+                 ownerAffiliations: [OWNER, ORGANIZATION_MEMBER],
+                 isFork: false) {
       nodes {
         languages(first: 12, orderBy: {field: SIZE, direction: DESC}) {
           edges { size node { name } }

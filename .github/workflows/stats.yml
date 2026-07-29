@@ -14,9 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # STATS_TOKEN is a personal access token (repo + read:org scopes) -
+      # the default GITHUB_TOKEN can only see this one repo, so it can't
+      # read language/contribution data from other private or org repos.
       - run: python3 scripts/generate_stats.py
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STATS_TOKEN }}
           GH_LOGIN: ${{ github.repository_owner }}
 
       - run: |

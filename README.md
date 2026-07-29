@@ -15,7 +15,7 @@ internal tools, integrations, and line-of-business apps.
 
 [![stack](hd-stack.svg)](hd-stack.svg)
 
-`python typescript javascript html css git`
+`javascript typescript python csharp html css git`
 
 [![projects](hd-projects.svg)](hd-projects.svg)
 
