@@ -3,24 +3,27 @@
 [Christianjameshart.com](https://Christianjameshart.com) · [instagram](https://www.instagram.com/christianjames270/) · [linkedin](https://www.linkedin.com/in/christian-hart-a0442136b) · [email](mailto:christian@pursuetech.com)
 
 [![about](hd-about.svg)](hd-about.svg)
-> One line about who you are.
-> Another line, in your own voice.
+> Developer based in Southern California, currently at Pursue Tech.
+> Came up through Bethel Tech's coding program — now building in Python, TypeScript, and JavaScript.
 
-A short paragraph about what you're building right now, and what you're
-interested in more broadly. Link a project inline if you want:
-[project-name](https://github.com/YOUR_USERNAME/project-name).
+Still early in the journey and building a range of small, practical tools —
+from computer vision experiments to web utilities — while leveling up on
+full-stack fundamentals.
 
 [![stack](hd-stack.svg)](hd-stack.svg)
 
-`python typescript react node docker git`
+`python typescript javascript html css git`
 
 [![projects](hd-projects.svg)](hd-projects.svg)
 
-**[project-one](https://github.com/YOUR_USERNAME/project-one)** · `typescript, react`
-One or two lines on what it does and why it's interesting.
+**[hand-estimation](https://github.com/ChristianjHart/hand-estimation)** · `python`
+Hand pose/gesture estimation experiment.
 
-**[project-two](https://github.com/YOUR_USERNAME/project-two)** · `python`
-One or two lines on what it does and why it's interesting.
+**[Chem-Website](https://github.com/ChristianjHart/Chem-Website)** · `javascript`
+A chemistry site built to help with homework.
+
+**[yttmp3](https://github.com/ChristianjHart/yttmp3)** · `python`
+A YouTube-to-MP3 conversion tool.
 
 [![stats](hd-stats.svg)](hd-stats.svg)
 
