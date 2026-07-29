@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""Draw the profile README's stat graphics from the GitHub GraphQL API.
+
+No third-party services and no dependencies beyond svgkit - standard
+library only for the network/data side.
+
+Outputs:
+  stats.svg   hero total + weekly sparkline
+  streak.svg  current and longest streak
+  langs.svg   top languages, by bytes and by repo count
+  year.svg    the year as a character map, in the portrait's own ramp
+  hd-*.svg    section headings ("about", "stack", "projects", "stats")
+
+Env:
+  GITHUB_TOKEN  required
+  GH_LOGIN      user to summarise (required - set to your username)
+  OUT_DIR       where to write (default: repository root)
+"""
+import json
+import os
+import sys
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
+
+from svgkit import (WIDTH, LEFT, REVEAL, RAMP, LIGHT, DARK,
+                     head, fade, wipe, label, hbar, draw_heading, write)
+
+API = "https://api.github.com/graphql"
+
+# Two things are pinned for determinism:
+#  * the contribution window, to whole UTC days - otherwise "the past year"
+#    drifts a fraction of a pixel between runs and commits noise nightly;
+#  * privacy: PUBLIC on repositories - otherwise a personal token sees
+#    private repos and the Actions token doesn't, so totals disagree.
+QUERY = """
+query($login: String!, $from: DateTime!, $to: DateTime!) {
+  user(login: $login) {
+    contributionsCollection(from: $from, to: $to) {
+      contributionCalendar {
+        totalContributions
+        weeks { contributionDays { contributionCount date weekday } }
+      }
+    }
+    repositories(first: 100, ownerAffiliations: OWNER, isFork: false,
+                 privacy: PUBLIC) {
+      nodes {
+        languages(first: 12, orderBy: {field: SIZE, direction: DESC}) {
+          edges { size node { name } }
+        }
+      }
+    }
+  }
+}
+"""
+
+MON = ["jan", "feb", "mar", "apr", "may", "jun",
+       "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+# ---------------------------------------------------------------- data
+
+def window():
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=364)
+    return (f"{start.isoformat()}T00:00:00Z", f"{today.isoformat()}T23:59:59Z")
+
+
+def fetch(login, token):
+    since, until = window()
+    body = json.dumps({"query": QUERY,
+                        "variables": {"login": login,
+                                      "from": since, "to": until}}).encode()
+    req = urllib.request.Request(
+        API, data=body,
+        headers={"Authorization": f"bearer {token}",
+                 "Content-Type": "application/json",
+                 "User-Agent": f"{login}-profile-stats"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        payload = json.load(r)
+    if "errors" in payload:
+        raise SystemExit(f"GraphQL errors: {payload['errors']}")
+    user = (payload.get("data") or {}).get("user")
+    if not user:
+        raise SystemExit(f"no such user: {login}")
+    return user
+
+
+def pretty(iso):
+    d = date.fromisoformat(iso)
+    return f"{MON[d.month - 1]} {d.day}"
+
+
+def streaks(days):
+    """Current and longest runs of days with at least one contribution."""
+    best = dict(length=0, start=None, end=None)
+    run, run_start = 0, None
+    for d in days:
+        if d["contributionCount"] > 0:
+            run += 1
+            run_start = run_start or d["date"]
+            if run > best["length"]:
+                best = dict(length=run, start=run_start, end=d["date"])
+        else:
+            run, run_start = 0, None
+
+    cur = dict(length=0, start=None, end=None)
+    tail = days[:-1] if days and days[-1]["contributionCount"] == 0 else days
+    for d in reversed(tail):
+        if d["contributionCount"] == 0:
+            break
+        cur["length"] += 1
+        cur["start"] = d["date"]
+        cur["end"] = cur["end"] or d["date"]
+    return cur, best
+
+
+def languages(repos):
+    by_size, by_repo = {}, {}
+    for node in repos:
+        edges = (node.get("languages") or {}).get("edges") or []
+        for e in edges:
+            name = e["node"]["name"]
+            by_size[name] = by_size.get(name, 0) + e["size"]
+        if edges:
+            top = edges[0]["node"]["name"]
+            by_repo[top] = by_repo.get(top, 0) + 1
+
+    def rank(d):
+        return sorted(d.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+
+    return rank(by_size), rank(by_repo)
+
+
+def summarise(user):
+    cal = user["contributionsCollection"]["contributionCalendar"]
+    weeks = [w["contributionDays"] for w in cal["weeks"]]
+    days = [d for w in weeks for d in w]
+    weekly = [sum(d["contributionCount"] for d in w) for w in weeks]
+    cur, best = streaks(days)
+    by_size, by_repo = languages(user["repositories"]["nodes"])
+    return dict(
+        total=cal["totalContributions"],
+        active=sum(1 for d in days if d["contributionCount"] > 0),
+        best_week=max(weekly) if weekly else 0,
+        weekly=weekly, weeks=weeks,
+        current=cur, longest=best,
+        by_size=by_size, by_repo=by_repo)
+
+
+# ---------------------------------------------------------------- drawing
+
+def draw_stats(s):
+    H = 148
+    weekly = s["weekly"] or [0]
+    peak = max(weekly) or 1
+    p = [head(WIDTH, H)]
+    p.append(f'<g opacity="0">{fade(0.10)}'
+              + label(0, 50, s["total"], 52, "e-f", extra=' font-weight="600"')
+              + label(0, 72, "contributions in the last year", 12) + '</g>')
+    for i, (val, lab) in enumerate([(s["active"], "active days"),
+                                     (s["best_week"], "best week")]):
+        p.append(f'<g opacity="0">{fade(0.30 + i * 0.12)}'
+                  + label(WIDTH, 30 + i * 40, val, 19, "e-f", "end",
+                          ' font-weight="600"')
+                  + label(WIDTH, 47 + i * 40, lab, 11, "m-f", "end") + '</g>')
+
+    base, top = H - 10, H - 58
+    span = base - top
+    step = WIDTH / max(len(weekly) - 1, 1)
+    pts = [(i * step, base - (v / peak) * span) for i, v in enumerate(weekly)]
+    clip, cursor = wipe("rs", 0, top - 6, WIDTH, span + 8, 0.50)
+    p.append(clip)
+    p.append('<g clip-path="url(#rs)">')
+    p.append(f'<path d="M{pts[0][0]:.1f} {base:.1f}'
+              + "".join(f'L{x:.1f} {y:.1f}' for x, y in pts)
+              + f'L{pts[-1][0]:.1f} {base:.1f}Z" class="w"/>')
+    p.append(f'<path d="M{pts[0][0]:.1f} {pts[0][1]:.1f}'
+              + "".join(f'L{x:.1f} {y:.1f}' for x, y in pts[1:])
+              + '" class="d-s" stroke-width="2" stroke-linejoin="round" '
+              'stroke-linecap="round"/>')
+    p.append("</g>")
+    p.append(cursor)
+    ex, ey = pts[-1]
+    p.append(f'<circle cx="{ex - 2:.1f}" cy="{ey:.1f}" r="4.5" class="e-f r" '
+              f'stroke-width="2" opacity="0">{fade(0.50 + REVEAL, 0.35)}</circle>')
+    p.append("</svg>")
+    return "".join(p)
+
+
+def draw_streak(s):
+    H = 96
+    cells = []
+    for k, lab in (("current", "current streak"), ("longest", "longest streak")):
+        r = s[k]
+        span = (f"{pretty(r['start'])} &#8211; {pretty(r['end'])}"
+                if r["length"] else "&#8212;")
+        cells.append((r["length"], lab, span))
+
+    p = [head(WIDTH, H)]
+    mid = WIDTH / 2
+    p.append(f'<line x1="{mid:.0f}" y1="16" x2="{mid:.0f}" y2="80" '
+              f'class="u-s" stroke-width="1" opacity="0">{fade(0.20)}</line>')
+    for i, (val, lab, span) in enumerate(cells):
+        x = LEFT if i == 0 else mid + LEFT
+        p.append(f'<g opacity="0">{fade(0.12 + i * 0.14)}'
+                  + label(x, 44, f"{val}", 34, "e-f", extra=' font-weight="600"')
+                  + label(x, 64, lab, 11)
+                  + label(x, 80, span, 10) + '</g>')
+    p.append("</svg>")
+    return "".join(p)
+
+
+def draw_langs(s):
+    rows = max(len(s["by_size"]), len(s["by_repo"]), 1)
+    H = 26 + rows * 22 + 6
+    colw = (WIDTH - LEFT - 30) / 2
+    name_w, bar_max = 82, colw - 82 - 44
+
+    p = [head(WIDTH, H)]
+    groups = [(LEFT, "by bytes", s["by_size"], True),
+              (LEFT + colw + 30, "by repos", s["by_repo"], False)]
+    for gi, (gx, title, data, as_pct) in enumerate(groups):
+        p.append(f'<g opacity="0">{fade(0.10 + gi * 0.10)}'
+                  + label(gx, 12, title.upper(), 9, "m-f",
+                          extra=' letter-spacing="1.3"') + '</g>')
+        if not data:
+            continue
+        top = max(v for _, v in data) or 1
+        total = sum(v for _, v in data) or 1
+        cid = f"rl{gi}"
+        clip, cursor = wipe(cid, gx + name_w, 20, bar_max, rows * 22,
+                             0.34 + gi * 0.12, 0.95)
+        p.append(clip)
+        for ri, (name, val) in enumerate(data):
+            y = 26 + ri * 22
+            shown = (f"{val / total * 100:.0f}%" if as_pct else f"{val}")
+            p.append(f'<g opacity="0">{fade(0.24 + gi * 0.10 + ri * 0.05)}'
+                      + label(gx, y + 8, name.lower()[:11], 11, "e-f")
+                      + label(gx + colw - 6, y + 8, shown, 11, "m-f", "end")
+                      + '</g>')
+            p.append(f'<g clip-path="url(#{cid})">'
+                      + hbar(gx + name_w, y, bar_max * val / top, 7)
+                      + '</g>')
+        p.append(cursor)
+    p.append("</svg>")
+    return "".join(p)
+
+
+def draw_year(s):
+    FS, LH, COLW = 9.2, 11.0, 2
+    CW = FS * 0.6
+    pad_l, pad_t = LEFT, 44
+    weeks = s["weeks"]
+    H = int(pad_t + 7 * LH + 26)
+
+    def level(v):
+        for i, cut in enumerate((0, 2, 5, 9)):
+            if v <= cut:
+                return i
+        return 4
+
+    p = [head(WIDTH, H)]
+    p.append(f'<g opacity="0">{fade(0.10)}'
+              + label(pad_l, 16, "THE YEAR", 9, "m-f",
+                      extra=' letter-spacing="1.3"')
+              + label(pad_l, 32, f"{s['active']} of "
+                      f"{sum(len(w) for w in weeks)} days had a contribution", 11)
+              + '</g>')
+
+    lx = WIDTH - 6
+    p.append(f'<g opacity="0">{fade(1.30)}'
+              + label(lx - 78, 32, "less", 9, "m-f", "end")
+              + f'<text xml:space="preserve" x="{lx - 72}" y="32" class="d-f" '
+              f'font-size="{FS}">{" ".join(RAMP[1:])}</text>'
+              + label(lx, 32, "more", 9, "m-f", "end") + '</g>')
+
+    for r in range(7):
+        chars = []
+        for w in weeks:
+            day = next((d for d in w if d.get("weekday") == r), None)
+            v = day["contributionCount"] if day else 0
+            chars.append(RAMP[level(v)] * COLW)
+        line = "".join(chars).rstrip()
+        if not line:
+            continue
+        y = pad_t + r * LH
+        w_px = max(len(line), 1) * CW
+        cid = f"ry{r}"
+        delay = 0.30 + r * 0.07
+        p.append(f'<clipPath id="{cid}"><rect x="{pad_l}" y="{y}" '
+                  f'height="{LH}" width="0"><animate attributeName="width" '
+                  f'from="0" to="{w_px:.1f}" begin="{delay:.2f}s" dur="0.40s" '
+                  f'fill="freeze"/></rect></clipPath>')
+        safe = line.replace("&", "&amp;").replace("<", "&lt;")
+        p.append(f'<g clip-path="url(#{cid})"><text xml:space="preserve" '
+                  f'x="{pad_l}" y="{y + FS - 0.6:.1f}" class="d-f" '
+                  f'font-size="{FS}">{safe}</text></g>')
+
+    for r, lab in ((1, "mon"), (3, "wed"), (5, "fri")):
+        p.append(label(pad_l - 7, pad_t + r * LH + FS - 0.6, lab, 9, "m-f",
+                        "end"))
+
+    last_m, last_x = None, -999.0
+    base_y = pad_t + 7 * LH + 13
+    for i, w in enumerate(weeks):
+        m = int(w[0]["date"][5:7])
+        x = pad_l + i * COLW * CW
+        if m != last_m and i < len(weeks) - 1 and x - last_x >= 34:
+            p.append(label(x, base_y, MON[m - 1], 9, "m-f"))
+            last_x = x
+        last_m = m
+
+    p.append("</svg>")
+    return "".join(p)
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        sys.exit("GITHUB_TOKEN is not set")
+    login = os.environ.get("GH_LOGIN")
+    if not login:
+        sys.exit("GH_LOGIN is not set - put your GitHub username in the workflow env")
+    out_dir = os.environ.get("OUT_DIR", ".")
+
+    s = summarise(fetch(login, token))
+    files = {"stats.svg": draw_stats(s), "streak.svg": draw_streak(s),
+             "langs.svg": draw_langs(s), "year.svg": draw_year(s)}
+    for word in ("about", "stack", "projects", "stats", "about this page"):
+        files[f"hd-{word.replace(' ', '-')}.svg"] = draw_heading(word)
+
+    changed = [n for n, svg in files.items()
+               if write(os.path.join(out_dir, n), svg)]
+    print(f"{s['total']} contributions, {s['active']} active days, "
+          f"best week {s['best_week']}, current streak "
+          f"{s['current']['length']}, longest {s['longest']['length']}")
+    print("languages by bytes: "
+          + ", ".join(f"{n} {v}" for n, v in s["by_size"]))
+    print("updated: " + (", ".join(sorted(changed)) if changed else "nothing"))
+
+
+if __name__ == "__main__":
+    main()
